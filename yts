@@ -1,0 +1,320 @@
+#!/bin/bash
+
+# yts - Youtube Search with thumbnail and Play Video
+# original: PSG
+# created by: PSG
+# this version: https://gist.github.com/canabady/
+# edited by: Selvacanabady P <canabady@gmail.com>
+# license: BSD 3-Clause <http://opensource.org/licenses/BSD-3-Clause>
+#
+# converted to a script for easier redistribution and development
+# expanded to perform both searching and providing of URLs
+#
+# todo:
+#     * 
+#
+# options:
+#     -h
+#         print this help text in your terminal
+#     -s "search term"
+#         do a search for the "search term"
+#         shows a list of numbers and titles, use the number with `-w` to watch the video
+#     -w n "search term"
+#         get URL for the nth video in the list of search results
+#         currently uses `echo`, need to get this tested on other environments
+
+# consolidate help text to a single location to minimise inconsistencies
+
+_MODE="yts"
+
+# COMMON PARAMS
+YTS_ROOT_DIR="/tmp/${_MODE}"
+YTS_JSON_DIR="${YTS_ROOT_DIR}/json"
+YTS_IMG_DIR="${YTS_ROOT_DIR}/img"
+YTS_HTML_FILE="${YTS_ROOT_DIR}/yts.html"
+YTS_PDF_FILE="${YTS_ROOT_DIR}/yts.html.pdf"
+
+
+# The default action of <ENTER_KEY> on image to buffer video with mpv
+#FEH_ACTION="mpv --really-quiet --fs --ytdl-format=18 ytdl://%n"
+FEH_ACTION="echo 'Playing ytdl://%n'; mpv  --really-quiet --fs --ytdl-format=18 ytdl://%n"
+# Pressing Key '1' to view the thumbnail in Fullscreen mode"
+FEH_ACTION_1="feh -F %f"
+# Pressing Key '1' to view the thumbnail in Fullscreen mode"
+FEH_ACTION_2="/bin/bash ${HOME}/bin/yts -i %n"
+
+# Create dir, if not exists, for yt-thumbnails
+mkdir -p "${YTS_ROOT_DIR}" "${YTS_JSON_DIR}" "${YTS_IMG_DIR}"
+
+# Delete all existing files, if any in ${YTS_IMG_DIR}"
+# rm -f ${YTS_IMG_DIR}/*
+
+# ytsearch count
+YT_SEARCH_COUNT=5
+# ytsearch extract
+YT_SEARCH_EXTRACTOR="ytsearch"
+
+# Touch YT_LAST_SEARCH_TEXT
+YT_LAST_SEARCH_FILE="${YTS_ROOT_DIR}/.yts_last_search_text"
+touch "${YT_LAST_SEARCH_FILE}"
+YT_LAST_SEARCH_TEXT=$(cat "${YT_LAST_SEARCH_FILE}"| tr -d '\n')
+
+
+function displaytime {
+  local T=$1
+  local D=$((T/60/60/24))
+  local H=$((T/60/60%24))
+  local M=$((T/60%60))
+  local S=$((T%60))
+  [[ $D > 0 ]] && printf '%d days ' $D
+  [[ $H > 0 ]] && printf '%d hours ' $H
+  [[ $M > 0 ]] && printf '%d minutes ' $M
+  [[ $D > 0 || $H > 0 || $M > 0 ]] && printf 'and '
+  printf '%d seconds\n' $S
+}
+
+function getVideoInfoAsJson {
+  if [ ! -f "${YTS_JSON_DIR}/${1}.json" ]; then
+	   echo -n "Getting json info for id:[ $1 ]..."
+	   jsonDump=$(youtube-dl -j -o "%(id)s" "$1")
+	   echo "${jsonDump}" > "${YTS_JSON_DIR}/${1}.json"
+	   echo "done."
+  fi
+}
+
+yts_help(){
+    printf "%s\n" "yts"
+
+    printf "%s\n" "options:"
+        printf "\t%s\n" "-h"
+            printf "\t\t%s\n" "print this help text in your terminal"
+        printf "\t%s\n" "-s \"search term\""
+            printf "\t\t%s\n" "do a search for the \"search term\""
+            printf "\t\t%s\n" "shows a list of numbers and titles, use the number with \`-w\` to watch the video"
+        printf "\t%s\n" "-i n \"show information\""
+            printf "\t\t%s\n" "info of the nth video in the list of search results"
+            printf "\t\t%s\n" "currently uses \`echo\`, need to get this tested on other environments"
+        printf "\t%s\n" "-w n \"search term\""
+            printf "\t\t%s\n" "watch the nth video in the list of search results"
+            printf "\t\t%s\n" "currently uses \`echo\`, need to get this tested on other environments"
+
+    exit
+}
+
+# catch no-parameter usage
+if [ -z $1 ]; then
+  yts_help
+fi
+
+# apparently Linux doesn't have -r flag for sed...
+sed_r(){
+    DIST="linux"
+    case `uname -s` in
+        "Darwin")
+            DIST="mac"
+            ;;
+        "$(expr substr $(uname -s) 1 10)")
+            DIST="win"
+            ;;
+    esac
+    while getopts ":wt" opt; do
+        case $opt in
+            w)
+                if [ $DIST == "win" ]; then
+                    echo sed -r -e 's/^watch\?v=([^"]*)".*/\1/g'
+                else
+                    echo sed -e 's/^watch\?v=\([^"]*\)".*/\1/g'
+                fi
+                ;;
+            t)
+                if [ $DIST == "win" ]; then
+                    echo sed -r -e 's/^.*title="(.*)/\1/g'
+                else
+                    echo sed -e 's/^.*title="\(.*\)/\1/g'
+                fi
+                ;;
+        esac
+    done
+}
+
+# main functionality
+
+# Check for network connection
+_network=$(nmcli networking connectivity)
+if [ "${_network}" == "none" ]; then
+  echo "Error: Check your network connection and Try again."
+  exit 1;
+fi
+
+firstCharOfFirstArg=$(echo "${1}" | cut -c 1)
+if [ ${firstCharOfFirstArg} == "-" ]; then
+	while getopts ":hwis" opt; do
+	    case $opt in
+		h)
+		    yts_help
+		    ;;
+		s)
+			# if second param is not supplied
+			if [ -z "$2" ]; then
+				yts_help;
+				exit 1;
+			fi
+
+		    oldifs="$IFS"
+		    IFS=$'\n'
+		    # searchResults=($(youtube-dl --get-thumbnail ytsearch${YT_SEARCH_COUNT}:"$3"))
+		    IFS="$oldifs"
+
+		    for sResult in $(youtube-dl --get-thumbnail ytsearch${YT_SEARCH_COUNT}:"$2"); do
+			    urlRoot="${sResult%/*}"
+			    yId="${urlRoot##*/}"
+			    wget -q -O "${YTS_IMG_DIR}/${yId}.jpg" "${sResult}"
+		    done
+
+		    # feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${YTS_IMG_DIR}"	    
+		    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_SEARCH_COUNT}")	    
+		    ;;
+		i)
+			# if second param is not supplied
+			if [ -z "$2" ]; then
+				yts_help;
+				exit 1;
+			fi
+
+			if [ -z "${YTS_JSON_DIR}/${2}.json" ]; then
+				getVideoInfoAsJson "${2}"
+			fi
+
+			# Read the required information from json file
+			videoTitle=$(jq '.title' "${YTS_JSON_DIR}/$2.json")
+
+			# Video duration is in seconds, so convert it to hh:mm:ss
+			secs=$(jq '.duration'  "${YTS_JSON_DIR}/$2.json")
+			# videoDuration=$(printf '%02dh:%02dm:%02ds\n' $(($secs/3600)) $(($secs%3600/60)) $(($secs%60)))
+			videoDuration=$(displaytime $secs)
+
+			videoDescription=$(jq '.description'  "${YTS_JSON_DIR}/$2.json")
+			# Replace \n with <br /> tag in the text
+			videoDescription="${videoDescription//\\n/\<br \/\>}"
+
+			# Template for pdf
+			videoTemplate='
+			<html><head><meta charset="UTF-8" />
+			<title>'"${videoTitle}"'</title></head>
+			<body style="font-size:24px;background-color:white">
+
+			   <table border=0 width="90%" style="font-size:24px;">
+			    <tr>
+				<td><b>Title</b>: '"${videoTitle}"'</td>
+			    </tr>
+			    <tr>
+				<td><b>Duration</b>: '"${videoDuration}"'</td>
+			    </tr>
+			    <tr>
+				<td><img src='"file:///${YTS_IMG_DIR}/$2"' width=900 height=500/></td>
+			    </tr>
+			    <tr>
+				<td><b>Description</b>: '"${videoDescription}"'</td>
+			    </tr>
+			   </table>
+
+			</body>
+			'
+
+
+			# Write template output to YTS_HTML_FILE
+			echo "${videoTemplate}" > "${YTS_HTML_FILE}"
+
+			# Convert html page to pdf
+			wkhtmltopdf --encoding utf-8 "${YTS_HTML_FILE}" "${YTS_PDF_FILE}" >/dev/null 2>&1
+
+			# Open the convert pdf in xpdf
+			xpdf -fullscreen "${YTS_PDF_FILE}" & #>/dev/null 2>&1
+
+			# Wait for the xpdf to load
+			sleep 1
+			# Zoom pdf to fullscreen
+			pdfWndId=$(xdotool search --name "${YTS_PDF_FILE}")
+			if [ "${pdfWndId}" ]; then
+			    xdotool windowfocus "${pdfWndId}"  && xdotool key w
+			fi
+			;;
+		w)
+
+		    # If search param is missing, show help	
+		    if [ -z "$2" ]; then
+		       yts_help
+		    fi	       
+
+		    # If search result count is given, update YT_SEARCH_COUNT
+		    if [ ! -z "$3" ]; then
+			    YT_SEARCH_COUNT="$3"
+
+			    if [ "$3" -gt 9 ]; then
+			       YT_SEARCH_COUNT=""
+			       YT_SEARCH_EXTRACTOR="ytsearchall"
+			    fi
+		    fi	       
+
+		    if [ "$2" != "${YT_LAST_SEARCH_TEXT}" ]; then
+			    oldifs="$IFS"
+			    IFS=$'\n'
+			    echo -n "Getting youtube Ids..."
+			    searchResults=($(youtube-dl --get-id ${YT_SEARCH_EXTRACTOR}${YT_SEARCH_COUNT}:"$2"))
+			    echo " ${searchResults[@]} done."
+
+			    # Push the search text to ${YT_LAST_SEARCH_TEXT}
+			    echo "${2}" > "${YT_LAST_SEARCH_FILE}"
+
+
+			    IFS="$oldifs"
+			    # Initialize thumbnail Array
+			    thumbnailFilesArray=()
+			    for yId in "${!searchResults[@]}"; do
+				   getVideoInfoAsJson "${searchResults[$yId]}"
+				   # jsonDump=$(youtube-dl -j -o "%(id)s" "${searchResults[yId]}")
+				   # echo "${jsonDump}" > "${YTS_JSON_DIR}/${searchResults[yId]}.json"
+				   videoThumbnail=$(cat  "${YTS_JSON_DIR}/${searchResults[$yId]}.json" | jq '.thumbnail' | sed 's/\"//g')
+				   thumbnailFile="${YTS_IMG_DIR}/${searchResults[$yId]}" 
+				   if [ ! -f "${thumbnailFile}" ];then
+					   echo -n "Fetching thumbnail for id:[ ${searchResults[$yId]} ]..."
+					   wget -q -O "${thumbnailFile}" ${videoThumbnail}
+					   echo "done."
+				   fi
+				   thumbnailFilesArray+=( "${thumbnailFile}" )
+			    done
+
+			    #feh --thumb-title "yts - youtube search and play"  --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${thumbnailFilesArray[@]}"
+			    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${thumbnailFilesArray[@]}" -E 256 -y 256 -W 2048 --index-info "%u"    
+		    else
+			    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_SEARCH_COUNT}") -E 256 -y 256 -W 2048 --index-info "%u"    
+		    fi
+
+		    exit
+		    ;;
+		\?)
+		    printf "Invalid option: -%s\n\n" "$OPTARG"
+		    yts_help
+		    ;;
+		:)
+		    printf "Option -%s requires an argument\n\n" "$OPTARG"
+		    yts_help
+		    ;;
+		*)
+			echo "* option"
+		    yts_help
+		    ;;
+	    esac
+	done
+else
+	# If last arg is integer, i.e. search count
+	if [ "${!#//[0-9]}" = "" ]; then
+	    lastArg=$(printf "%d\n" "${!#}")
+	    allArgsExLast=${@:1:$#-1}
+	else
+	    lastArg=""
+	    allArgsExLast=${@:1:$#}
+	fi	
+
+	/bin/bash "${HOME}/bin/yts" -w "\"${allArgsExLast}\"" "${lastArg}"
+fi
