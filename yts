@@ -11,7 +11,7 @@
 # expanded to perform both searching and providing of URLs
 #
 # todo:
-#     * 
+#     *
 #
 # options:
 #     -h
@@ -25,10 +25,17 @@
 
 # consolidate help text to a single location to minimise inconsistencies
 
-_MODE="yts"
+# Base folder in /tmp
+FOLDER_NAME="yts"
+
+# Mode: fast, normal
+# fast: download only thumbnail
+# normal: download json and then fetch thumbnail using json
+_MODE="normal"
+_MODE="fast"
 
 # COMMON PARAMS
-YTS_ROOT_DIR="/tmp/${_MODE}"
+YTS_ROOT_DIR="${HOME}/${FOLDER_NAME}"
 YTS_JSON_DIR="${YTS_ROOT_DIR}/json"
 YTS_IMG_DIR="${YTS_ROOT_DIR}/img"
 YTS_HTML_FILE="${YTS_ROOT_DIR}/yts.html"
@@ -51,6 +58,8 @@ mkdir -p "${YTS_ROOT_DIR}" "${YTS_JSON_DIR}" "${YTS_IMG_DIR}"
 
 # ytsearch count
 YT_SEARCH_COUNT=5
+# For listing with head -n#
+YT_LIST_COUNT="${YT_SEARCH_COUNT}"
 # ytsearch extract
 YT_SEARCH_EXTRACTOR="ytsearch"
 
@@ -171,100 +180,102 @@ if [ ${firstCharOfFirstArg} == "-" ]; then
 			    wget -q -O "${YTS_IMG_DIR}/${yId}.jpg" "${sResult}"
 		    done
 
-		    # feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${YTS_IMG_DIR}"	    
-		    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_SEARCH_COUNT}")	    
+		    # feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${YTS_IMG_DIR}"
+		    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_LIST_COUNT}")
 		    ;;
 		i)
-			# if second param is not supplied
-			if [ -z "$2" ]; then
-				yts_help;
-				exit 1;
-			fi
+			if [ "${_MODE}" == "normal" ]; then
+				# if second param is not supplied
+				if [ -z "$2" ]; then
+					yts_help;
+					exit 1;
+				fi
 
-			if [ -z "${YTS_JSON_DIR}/${2}.json" ]; then
-				getVideoInfoAsJson "${2}"
-			fi
+				if [ -z "${YTS_JSON_DIR}/${2}.json" ]; then
+					getVideoInfoAsJson "${2}"
+				fi
 
-			# Read the required information from json file
-			videoTitle=$(jq '.title' "${YTS_JSON_DIR}/$2.json")
+				# Read the required information from json file
+				videoTitle=$(jq '.title' "${YTS_JSON_DIR}/$2.json")
 
-			# Video duration is in seconds, so convert it to hh:mm:ss
-			secs=$(jq '.duration'  "${YTS_JSON_DIR}/$2.json")
-			# videoDuration=$(printf '%02dh:%02dm:%02ds\n' $(($secs/3600)) $(($secs%3600/60)) $(($secs%60)))
-			videoDuration=$(displaytime $secs)
+				# Video duration is in seconds, so convert it to hh:mm:ss
+				secs=$(jq '.duration'  "${YTS_JSON_DIR}/$2.json")
+				# videoDuration=$(printf '%02dh:%02dm:%02ds\n' $(($secs/3600)) $(($secs%3600/60)) $(($secs%60)))
+				videoDuration=$(displaytime $secs)
 
-			videoDescription=$(jq '.description'  "${YTS_JSON_DIR}/$2.json")
-			# Replace \n with <br /> tag in the text
-			videoDescription="${videoDescription//\\n/\<br \/\>}"
+				videoDescription=$(jq '.description'  "${YTS_JSON_DIR}/$2.json")
+				# Replace \n with <br /> tag in the text
+				videoDescription="${videoDescription//\\n/\<br \/\>}"
 
-			# Template for pdf
-			videoTemplate='
-			<html><head><meta charset="UTF-8" />
-			<title>'"${videoTitle}"'</title></head>
-			<body style="font-size:24px;background-color:white">
+				# Template for pdf
+				videoTemplate='
+				<html><head><meta charset="UTF-8" />
+				<title>'"${videoTitle}"'</title></head>
+				<body style="font-size:24px;background-color:white">
 
-			   <table border=0 width="90%" style="font-size:24px;">
-			    <tr>
-				<td><b>Title</b>: '"${videoTitle}"'</td>
-			    </tr>
-			    <tr>
-				<td><b>Duration</b>: '"${videoDuration}"'</td>
-			    </tr>
-			    <tr>
-				<td><img src='"file:///${YTS_IMG_DIR}/$2"' width=900 height=500/></td>
-			    </tr>
-			    <tr>
-				<td><b>Description</b>: '"${videoDescription}"'</td>
-			    </tr>
-			   </table>
+				   <table border=0 width="90%" style="font-size:24px;">
+				    <tr>
+					<td><b>Title</b>: '"${videoTitle}"'</td>
+				    </tr>
+				    <tr>
+					<td><b>Duration</b>: '"${videoDuration}"'</td>
+				    </tr>
+				    <tr>
+					<td><img src='"file:///${YTS_IMG_DIR}/$2"' width=900 height=500/></td>
+				    </tr>
+				    <tr>
+					<td><b>Description</b>: '"${videoDescription}"'</td>
+				    </tr>
+				   </table>
 
-			</body>
-			'
+				</body>
+				'
 
 
-			# Write template output to YTS_HTML_FILE
-			echo "${videoTemplate}" > "${YTS_HTML_FILE}"
+				# Write template output to YTS_HTML_FILE
+				echo "${videoTemplate}" > "${YTS_HTML_FILE}"
 
-			# Convert html page to pdf
-			wkhtmltopdf --encoding utf-8 "${YTS_HTML_FILE}" "${YTS_PDF_FILE}" >/dev/null 2>&1
+				# Convert html page to pdf
+				wkhtmltopdf --encoding utf-8 "${YTS_HTML_FILE}" "${YTS_PDF_FILE}" >/dev/null 2>&1
 
-			# Open the convert pdf in xpdf
-			xpdf -fullscreen "${YTS_PDF_FILE}" & #>/dev/null 2>&1
+				# Open the convert pdf in xpdf
+				xpdf -fullscreen "${YTS_PDF_FILE}" & #>/dev/null 2>&1
 
-			# Wait for the xpdf to load
-			sleep 1
-			# Zoom pdf to fullscreen
-			pdfWndId=$(xdotool search --name "${YTS_PDF_FILE}")
-			if [ "${pdfWndId}" ]; then
-			    xdotool windowfocus "${pdfWndId}"  && xdotool key w
+				# Wait for the xpdf to load
+				sleep 1
+				# Zoom pdf to fullscreen
+				pdfWndId=$(xdotool search --name "${YTS_PDF_FILE}")
+				if [ "${pdfWndId}" ]; then
+				    xdotool windowfocus "${pdfWndId}"  && xdotool key w
+				fi
 			fi
 			;;
 		w)
 
-		    # If search param is missing, show help	
+		    # If search param is missing, show help
 		    if [ -z "$2" ]; then
 		       yts_help
-		    fi	       
+		    fi
 
 		    # If search result count is given, update YT_SEARCH_COUNT
 		    if [ ! -z "$3" ]; then
 			    YT_SEARCH_COUNT="$3"
+			    YT_LIST_COUNT="$3"
 
 			    if [ "$3" -gt 9 ]; then
 			       YT_SEARCH_COUNT=""
 			       YT_SEARCH_EXTRACTOR="ytsearchall"
 			    fi
-		    fi	       
+		    fi
 
 		    if [ "$2" != "${YT_LAST_SEARCH_TEXT}" ]; then
+			if [ "${_MODE}" == "normal" ]; then
 			    oldifs="$IFS"
 			    IFS=$'\n'
 			    echo -n "Getting youtube Ids..."
 			    searchResults=($(youtube-dl --get-id ${YT_SEARCH_EXTRACTOR}${YT_SEARCH_COUNT}:"$2"))
 			    echo " ${searchResults[@]} done."
 
-			    # Push the search text to ${YT_LAST_SEARCH_TEXT}
-			    echo "${2}" > "${YT_LAST_SEARCH_FILE}"
 
 
 			    IFS="$oldifs"
@@ -275,7 +286,7 @@ if [ ${firstCharOfFirstArg} == "-" ]; then
 				   # jsonDump=$(youtube-dl -j -o "%(id)s" "${searchResults[yId]}")
 				   # echo "${jsonDump}" > "${YTS_JSON_DIR}/${searchResults[yId]}.json"
 				   videoThumbnail=$(cat  "${YTS_JSON_DIR}/${searchResults[$yId]}.json" | jq '.thumbnail' | sed 's/\"//g')
-				   thumbnailFile="${YTS_IMG_DIR}/${searchResults[$yId]}" 
+				   thumbnailFile="${YTS_IMG_DIR}/${searchResults[$yId]}"
 				   if [ ! -f "${thumbnailFile}" ];then
 					   echo -n "Fetching thumbnail for id:[ ${searchResults[$yId]} ]..."
 					   wget -q -O "${thumbnailFile}" ${videoThumbnail}
@@ -283,11 +294,23 @@ if [ ${firstCharOfFirstArg} == "-" ]; then
 				   fi
 				   thumbnailFilesArray+=( "${thumbnailFile}" )
 			    done
+			    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${thumbnailFilesArray[@]}" -E 256 -y 256 -W 2048 --index-info "%u"
+		       else
+			       echo "Executing search: ${2}..."
+			       # Fetching thumbnail using youtube-dl search with write-thumbnail
+			       _result=$(youtube-dl --skip-download --write-thumbnail -o "${YTS_IMG_DIR}/%(id)s" ${YT_SEARCH_EXTRACTOR}${YT_SEARCH_COUNT}:"$2")
+			       # Removing '.jpg' extension from thumbnail for feh action
+			       rename 's/.jpg//' ${YTS_IMG_DIR}/*.jpg >/dev/null 2>&1
+			       # Remove any jpg file if not renamed ( as the basename exists )
+			       rm -f "${YTS_IMG_DIR}/*.jpg"
+			       # Show results using feh thumbnail mode
+			       feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_LIST_COUNT}") -E 256 -y 256 -W 2048 --index-info "%u"
+		       fi
 
-			    #feh --thumb-title "yts - youtube search and play"  --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${thumbnailFilesArray[@]}"
-			    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t "${thumbnailFilesArray[@]}" -E 256 -y 256 -W 2048 --index-info "%u"    
+		       # Push the search text to ${YT_LAST_SEARCH_TEXT}
+		       echo "${2}" > "${YT_LAST_SEARCH_FILE}"
 		    else
-			    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_SEARCH_COUNT}") -E 256 -y 256 -W 2048 --index-info "%u"    
+			    feh --action="${FEH_ACTION}"  --action1="${FEH_ACTION_1}" --action2="${FEH_ACTION_2}" -t $(ls -dt "${YTS_IMG_DIR}"/* | head -n"${YT_LIST_COUNT}") -E 256 -y 256 -W 2048 --index-info "%u"
 		    fi
 
 		    exit
@@ -314,7 +337,7 @@ else
 	else
 	    lastArg=""
 	    allArgsExLast=${@:1:$#}
-	fi	
+	fi
 
 	/bin/bash "${HOME}/bin/yts" -w "\"${allArgsExLast}\"" "${lastArg}"
 fi
