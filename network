@@ -1,0 +1,7 @@
+
+# To find the network connection currently in use
+_network_name=$(nmcli device show wlx503eaa704495 | sed -n -e '6p' | awk '{print $NF}')
+
+#echo " #[fg=colour235,bg=colour233]#[fg=colour240,bg=colour235] %H:%M:%S  #[fg=colour240,bg=colour235]#[fg=colour233,bg=colour240] %d-%b-%y #[fg=colour245,bg=colour240]#[fg=colour232,bg=colour245,bold] ${_network_name} #{net_speed} #{download_speed}"
+
+echo "${_network_name} #{net_speed}"
