@@ -1,0 +1,177 @@
+#!/bin/bash
+if [ -z $1 ]; then
+	echo "Usage: ${0##/*} <search-term>"
+	exit 1;
+else
+	searchText=${@:1:$#}
+fi
+
+
+function trim()
+{
+	#turn it on, for whitespace removal to work
+	shopt -s extglob
+
+	# Remove leading whitespaces
+	_output=${1##*( )}
+	# Remove trailing whitespaces
+	_output=${_output%%*( )}
+	# echo output
+	echo "${_output}"
+
+	#turn it off
+	shopt -u extglob
+}
+
+
+# Source: https://stackoverflow.com/questions/16571739/parsing-variables-from-config-file-in-bash
+CFG="${HOME}/bin/yti.conf";
+unset confArray # resets confArray
+declare -A confArray # declares an associative array
+for ini in `awk '/^\s*\[/' $CFG` # finds the SECTIONS (aka "ini")
+do
+  while read A B
+  do
+    # Strip off Inline Comments
+    B=${B%%\#*}
+    #trim A
+    A=$( trim "${A}" )
+    #trim B
+    B=$( trim "${B}" )
+    confArray[$A]=${B}
+    # echo "in conf $ini, $A is equal to"  ${confArray["$A"]}
+  #done < <(awk -F'=' '/\[/ {x=0} x==1 && $0~/=/ && NF==2 {print $1, $2} $0==INI {x=1}' INI="$ini" $CFG)
+  done < <(awk -F'=' '/\[/ {x=0} (x==1) && (!( $0~/^\s*#/)) && ($0~/[^#]/) && ($0~/=/) && (NF==2) {print $1, $2} $0==INI {x=1}' INI="$ini" $CFG)
+  # the awk splits the file into sections,
+  # and returns pairs of values separated by "="
+done
+# declare -p confArray # displays the current contents of confArray
+
+
+# Check for STORAGE_PATH variable
+eval "STORAGE_PATH=${confArray[STORAGE_PATH]}"
+if [ -z  "${STORAGE_PATH}" ]; then
+	# Assign it to ROOT_DIR
+	ROOT_DIR= "${HOME}/.yti"
+	# Create default dir, if not exist.
+	mkdir -p "${ROOT_DIR}"
+else
+	# Check if STORAGE_PATH var is a dir
+	if [ -d "${STORAGE_PATH}" ]; then
+		ROOT_DIR="${STORAGE_PATH}"
+	else
+		mkdir -p "${STORAGE_PATH}"
+		ROOT_DIR="${STORAGE_PATH}"
+	fi
+fi
+
+
+# Image Folder
+CACHE_THUMBNAIL=$(printf "%d" "${confArray[CACHE_THUMBNAIL]}")
+if [ "${CACHE_THUMBNAIL:=0}" -eq 1 ]; then
+	IMAGE_DIR="${ROOT_DIR}/img"
+	mkdir -p "${IMAGE_DIR}"
+else
+	IMAGE_DIR="${HOME}/.yti/img"
+	mkdir -p "${IMAGE_DIR}"
+fi
+
+
+# youtube-dl search limit
+SEARCH_LIMIT=$(printf '%d' "${confArray[LIMIT]}")
+if [ "${SEARCH_LIMIT:=5}" -gt 9 ]; then
+	YT_EXTRACTOR="ytsearchall"
+	THUMBNAIL_LIST_COUNT="${SEARCH_LIMIT}"
+	SEARCH_LIMIT=""
+else
+	YT_EXTRACTOR="ytsearch"
+	THUMBNAIL_LIST_COUNT="${SEARCH_LIMIT}"
+fi
+
+echo "Executing search: ${searchText}..."
+
+# Create a file for last search
+LAST_SEARCH="${ROOT_DIR}/.last_search"
+touch "${LAST_SEARCH}"
+lastSearchText=$(cat "${LAST_SEARCH}" | tr -d "\n")
+# If not search is not same, then do ytsearch
+if [ "${searchText}" != "${lastSearchText}" ]; then
+	# Fetching thumbnail using youtube-dl search with write-thumbnail
+	_result=$(youtube-dl --skip-download --write-thumbnail -o "${IMAGE_DIR}/%(id)s" ${YT_EXTRACTOR}${SEARCH_LIMIT}:"${searchText}")
+
+	# Push the search text to ${LAST_SEARCH}
+	echo "${searchText}" > "${LAST_SEARCH}"
+fi
+
+# Removing '.jpg' extension from thumbnail for feh action
+rename 's/.jpg//' ${IMAGE_DIR}/*.jpg >/dev/null 2>&1
+
+# Remove any jpg file if not renamed ( as the basename exists )
+rm -f "${IMAGE_DIR}/*.jpg"
+
+# Remove the image files if CACHE_THUMBNAIL=0
+#if [ "${CACHE_THUMBNAIL}" -eq 0 ]; then
+#   rm -f "${IMAGE_DIR}/*"
+#fi
+
+
+# Thumbnail Settings
+THUMBNAIL_WIDTH=$(printf '%d' "${confArray[THUMBNAIL_WIDTH]}")
+THUMBNAIL_HEIGHT=$(printf '%d' "${confArray[THUMBNAIL_HEIGHT]}")
+THUMBNAIL_CAPTION="${confArray[THUMBNAIL_CAPTION]}"
+PANEL_WIDTH=$(printf '%d' "${confArray[PANEL_WIDTH]}")
+
+# Player Settings
+# VIDEO_FORMAT_ID
+VIDEO_FORMAT_ID=$(printf '%d' "${confArray[VIDEO_FORMAT_ID]}")
+# AUDIO_ONLY
+if [ $(printf '%d' "${confArray[AUDIO_ONLY]}") -eq 1 ]; then AUDIO_ONLY="--no-video"; AUDIO_FORMAT=140; fi
+# FULL_SCREEN
+if [ $(printf '%d' "${confArray[FULL_SCREEN]}") -eq 1 ]; then FULL_SCREEN="--fs"; fi
+# LOOP (REPEAT)
+REPEAT=$(printf '%d' "${confArray[LOOP]}")
+if [ "${REPEAT}" -eq 0 ]; then LOOP="--loop=inf"; else LOOP="--loop=${REPEAT}"; fi
+# QUIET
+if [ $(printf '%d' "${confArray[QUIET]}") -eq 1 ]; then QUIET="--really-quiet"; fi
+
+# Player with options
+play="echo 'Playing ytdl://%n'; mpv  ${QUIET} ${AUDIO_ONLY} ${LOOP} ${FULL_SCREEN} --ytdl-format=${VIDEO_FORMAT_ID} ytdl://%n"
+
+# Video Folder
+SAVE_VIDEO=$(printf "%d" "${confArray[SAVE_VIDEO]}")
+if [ "${SAVE_VIDEO:=0}" -eq 1 ]; then
+	# If STORAGE_PATH is set, then set VIDEO_DIR
+	if [ -d "${confArray[STORAGE_PATH]}" ]; then
+		VIDEO_DIR="${ROOT_DIR}/vid"
+	else
+		VIDEO_DIR="${ROOT_DIR}/vid"
+		mkdir -p "${VIDEO_DIR}"
+	fi
+
+	# Change video format to audio only, if AUDIO_ONLY flag set
+	if [ "${AUDIO_FORMAT}" ]; then VIDEO_FORMAT_ID="${AUDIO_FORMAT}"; fi
+
+	play="youtube-dl -f ${VIDEO_FORMAT_ID} -o \"${VIDEO_DIR}/%%(title)s.%%(ext)s\" %n --exec mpv"
+fi
+
+# Event Key Array
+eventsArray=( "EVENT_0" "EVENT_1" "EVENT_2" "EVENT_3" "EVENT_4" "EVENT_5" "EVENT_6" "EVENT_7" "EVENT_8" "EVENT_9" )
+oldifs="$IFS"
+IFS=$'\n'
+# Init action array
+ac=()
+# Populate actions
+for event in "${!eventsArray[@]}";
+do
+   if [	"${confArray[${eventsArray[$event]}]}" == "play" ]; then
+	   ac+=( "${play}" )
+   else
+	   ac+=( ${confArray[${eventsArray[$event]}]} )
+   fi
+done
+IFS="$oldifs"
+
+#Display thumbnail Panel
+#feh ${ac[*]} -t $(ls -dt "${IMAGE_DIR}" | head -n"${THUMBNAIL_LIST_COUNT}") -E "${THUMBNAIL_WIDTH:-255}" -y "${THUMBNAIL_HEIGHT:-256}" -W "${PANEL_WIDTH:-2048}" --index-info "${THUMBNAIL_CAPTION:-%u}"
+
+feh --action="${ac[0]}"  --action1="${ac[1]}"  --action2="${ac[2]}" --action3="${ac[3]}" --action4="${ac[4]}" --action5="${ac[5]}" --action6="${ac[6]}" --action7="${ac[7]}" --action8="${ac[8]}" --action9="${ac[9]}" -t $(ls -dt "${IMAGE_DIR}" | head -n"${THUMBNAIL_LIST_COUNT}") -E "${THUMBNAIL_WIDTH:-256}" -y "${THUMBNAIL_HEIGHT:-256}" -W "${PANEL_WIDTH:-2048}" --index-info "${THUMBNAIL_CAPTION:-%u}"
